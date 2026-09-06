@@ -1,0 +1,6 @@
+{
+  "name": "Virtual Piano",
+  "description": "A modern digital piano studio with realistic acoustic grand piano sound, full 88-key architecture, recording, metronome, and keyboard controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
