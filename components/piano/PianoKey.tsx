@@ -11,7 +11,7 @@ interface PianoKeyProps {
   keyLabelDisplay: KeyLabelDisplay;
   isScaleHighlight?: boolean;
   isPracticeTarget?: boolean;
-  onNoteStart: (midi: number) => void;
+  onNoteStart: (midi: number, velocity?: number) => void;
   onNoteStop: (midi: number) => void;
 }
 
@@ -28,9 +28,13 @@ export const PianoKey = memo(function PianoKey({
 }: PianoKeyProps) {
   const isBlack = note.type === 'black';
 
-  const handlePointerDown = (e: React.PointerEvent) => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
-    onNoteStart(note.midi);
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickY = e.clientY - rect.top;
+    const ratio = Math.max(0, Math.min(1, clickY / rect.height));
+    const estimatedVelocity = 0.55 + ratio * 0.4;
+    onNoteStart(note.midi, estimatedVelocity);
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
@@ -38,10 +42,14 @@ export const PianoKey = memo(function PianoKey({
     onNoteStop(note.midi);
   };
 
-  const handlePointerEnter = (e: React.PointerEvent) => {
+  const handlePointerEnter = (e: React.PointerEvent<HTMLButtonElement>) => {
     // Enable glissando / swipe when mouse or touch pointer is held down
     if (e.buttons === 1) {
-      onNoteStart(note.midi);
+      const rect = e.currentTarget.getBoundingClientRect();
+      const clickY = e.clientY - rect.top;
+      const ratio = Math.max(0, Math.min(1, clickY / rect.height));
+      const estimatedVelocity = 0.55 + ratio * 0.4;
+      onNoteStart(note.midi, estimatedVelocity);
     }
   };
 

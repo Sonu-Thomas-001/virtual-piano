@@ -12,8 +12,8 @@ export const MAX_MIDI = 108; // C8
 /**
  * Calculates note frequency in Hertz using standard concert pitch A4 = 440Hz.
  */
-export function midiToFrequency(midi: number): number {
-  return +(440 * Math.pow(2, (midi - 69) / 12)).toFixed(2);
+export function midiToFrequency(midi: number, tuningHz: number = 440): number {
+  return +(tuningHz * Math.pow(2, (midi - 69) / 12)).toFixed(2);
 }
 
 /**

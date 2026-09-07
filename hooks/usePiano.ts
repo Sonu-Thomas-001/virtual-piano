@@ -7,6 +7,7 @@ import {
   PianoSettings,
   Recording,
   NoteEvent,
+  InstrumentId,
 } from '@/types/piano';
 import {
   ALL_88_KEYS,
@@ -16,14 +17,20 @@ import {
   getScalePracticeSequence,
   PracticeStep,
 } from '@/lib/notes';
-import { SCALES_LIST } from '@/lib/constants';
+import { SCALES_LIST, resolveInstrument } from '@/lib/constants';
 import { AudioEngine } from '@/lib/audio/AudioEngine';
 import { MidiController, MidiStatus } from '@/lib/midi';
 import { PlaybackEngine } from '@/lib/recording/PlaybackEngine';
-import { loadSettings, saveSettings, loadRecordings, saveRecordings, DEFAULT_SETTINGS } from '@/lib/storage';
+import { downloadMidiFile } from '@/lib/recording/midiExport';
+import {
+  loadSettings,
+  saveSettings,
+  loadRecordings,
+  saveRecordings,
+  DEFAULT_SETTINGS,
+} from '@/lib/storage';
 
 export function usePiano() {
-  // Use consistent defaults for initial render so SSR matches client hydration
   const [settings, setSettings] = useState<PianoSettings>(DEFAULT_SETTINGS);
   const [isAudioReady, setIsAudioReady] = useState(false);
   const [audioStatusText, setAudioStatusText] = useState<'initializing' | 'ready' | 'waiting'>('waiting');
@@ -35,8 +42,10 @@ export function usePiano() {
   const [practiceCurrentStepIndex, setPracticeCurrentStepIndex] = useState<number>(0);
   const [practiceCompleted, setPracticeCompleted] = useState<boolean>(false);
 
-  // Sustain state
+  // Three-Pedal System states
   const [sustain, setSustain] = useState<boolean>(false);
+  const [sostenuto, setSostenuto] = useState<boolean>(false);
+  const [softPedal, setSoftPedal] = useState<boolean>(false);
 
   // Metronome state
   const [metronomeBeat, setMetronomeBeat] = useState<number>(0);
@@ -58,6 +67,7 @@ export function usePiano() {
   // Playback state
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [isLooping, setIsLooping] = useState<boolean>(false);
   const [activePlaybackId, setActivePlaybackId] = useState<string | null>(null);
   const [playbackProgressMs, setPlaybackProgressMs] = useState<number>(0);
   const [playbackDurationMs, setPlaybackDurationMs] = useState<number>(0);
@@ -97,6 +107,14 @@ export function usePiano() {
       setIsAudioReady(ready);
       setAudioStatusText(ready ? 'ready' : 'waiting');
     }
+  }, []);
+
+  // Hard requirement: STUCK NOTE PROTECTION (release all voices and state)
+  const releaseAllNotes = useCallback(() => {
+    audioEngineRef.current?.stopAllNotes();
+    setActiveNotes(new Map());
+    physicalKeysHeldRef.current.clear();
+    isMouseDownRef.current = false;
   }, []);
 
   // Play Note Event Handler
@@ -154,7 +172,6 @@ export function usePiano() {
         if (!prev.has(midi)) return prev;
         const current = prev.get(midi);
         if (source && current && current.source !== source) {
-          // If pressed by another source, keep it
           return prev;
         }
         const next = new Map(prev);
@@ -186,22 +203,96 @@ export function usePiano() {
     handleNoteStopRef.current = handleNoteStop;
   }, [handleNoteStart, handleNoteStop]);
 
+  // Sync settings changes to storage & audio engine
+  const updateSettings = useCallback(
+    (updater: Partial<PianoSettings> | ((prev: PianoSettings) => PianoSettings)) => {
+      setSettings((prev) => {
+        const next = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
+        saveSettings(next);
+
+        if (audioEngineRef.current) {
+          if (next.volume !== prev.volume || next.isMuted !== prev.isMuted) {
+            audioEngineRef.current.setVolume(next.isMuted ? 0 : next.volume);
+          }
+          if (next.instrument !== prev.instrument) {
+            audioEngineRef.current.setInstrument(next.instrument);
+          }
+          if (next.sustainEnabled !== prev.sustainEnabled) {
+            audioEngineRef.current.setSustain(next.sustainEnabled);
+            setSustain(next.sustainEnabled);
+          }
+          if (next.sostenutoEnabled !== prev.sostenutoEnabled) {
+            audioEngineRef.current.setSostenuto(!!next.sostenutoEnabled);
+            setSostenuto(!!next.sostenutoEnabled);
+          }
+          if (next.softPedalEnabled !== prev.softPedalEnabled) {
+            audioEngineRef.current.setSoftPedal(!!next.softPedalEnabled);
+            setSoftPedal(!!next.softPedalEnabled);
+          }
+          if (next.brightness !== prev.brightness) {
+            audioEngineRef.current.setBrightness(next.brightness ?? 55);
+          }
+          if (next.dynamics !== prev.dynamics) {
+            audioEngineRef.current.setDynamics(next.dynamics ?? 75);
+          }
+          if (next.tuningHz !== prev.tuningHz) {
+            audioEngineRef.current.setTuningHz(next.tuningHz ?? 440);
+          }
+          if (next.stereoWidth !== prev.stereoWidth) {
+            audioEngineRef.current.setStereoWidth(next.stereoWidth ?? 70);
+          }
+          if (next.eqLow !== prev.eqLow || next.eqMid !== prev.eqMid || next.eqHigh !== prev.eqHigh) {
+            audioEngineRef.current.setEQ(next.eqLow ?? 0, next.eqMid ?? 0, next.eqHigh ?? 0);
+          }
+          if (next.damperResonance !== prev.damperResonance) {
+            audioEngineRef.current.setDamperResonance(next.damperResonance ?? 40);
+          }
+          if (next.metronomeBpm !== prev.metronomeBpm) {
+            audioEngineRef.current.updateMetronomeBpm(next.metronomeBpm);
+          }
+          if (next.transpose !== prev.transpose) {
+            audioEngineRef.current.setTranspose(next.transpose);
+          }
+          if (next.reverb !== prev.reverb) {
+            audioEngineRef.current.setReverb(next.reverb);
+          }
+        }
+        return next;
+      });
+    },
+    []
+  );
+
   // Initialize Engines and saved data on client mount
   useEffect(() => {
     audioEngineRef.current = AudioEngine.getInstance();
     playbackEngineRef.current = new PlaybackEngine();
     midiControllerRef.current = new MidiController();
 
-    // Restore persisted settings & recordings without causing SSR hydration mismatch
     queueMicrotask(() => {
       try {
         const savedSettings = loadSettings();
         setSettings(savedSettings);
         setSustain(savedSettings.sustainEnabled);
+        setSostenuto(!!savedSettings.sostenutoEnabled);
+        setSoftPedal(!!savedSettings.softPedalEnabled);
+
         audioEngineRef.current?.setVolume(savedSettings.volume);
         audioEngineRef.current?.setMute(savedSettings.isMuted);
         audioEngineRef.current?.setInstrument(savedSettings.instrument);
         audioEngineRef.current?.setSustain(savedSettings.sustainEnabled);
+        audioEngineRef.current?.setSostenuto(!!savedSettings.sostenutoEnabled);
+        audioEngineRef.current?.setSoftPedal(!!savedSettings.softPedalEnabled);
+        audioEngineRef.current?.setBrightness(savedSettings.brightness ?? 55);
+        audioEngineRef.current?.setDynamics(savedSettings.dynamics ?? 75);
+        audioEngineRef.current?.setTuningHz(savedSettings.tuningHz ?? 440);
+        audioEngineRef.current?.setStereoWidth(savedSettings.stereoWidth ?? 70);
+        audioEngineRef.current?.setEQ(
+          savedSettings.eqLow ?? 0,
+          savedSettings.eqMid ?? 0,
+          savedSettings.eqHigh ?? 0
+        );
+        audioEngineRef.current?.setDamperResonance(savedSettings.damperResonance ?? 40);
         audioEngineRef.current?.setTranspose(savedSettings.transpose ?? 0);
         audioEngineRef.current?.setReverb(savedSettings.reverb ?? 'hall');
 
@@ -241,7 +332,7 @@ export function usePiano() {
       },
     });
 
-    // Auto-listen for MIDI devices if available
+    // Auto-listen for MIDI devices with full 3-pedal CC handling
     midiControllerRef.current.init({
       onNoteOn: (midi, velocity) => {
         handleNoteStartRef.current(midi, velocity, 'midi');
@@ -249,13 +340,34 @@ export function usePiano() {
       onNoteOff: (midi) => {
         handleNoteStopRef.current(midi, 'midi');
       },
+      onPedalChange: (pedal, active) => {
+        if (pedal === 'sustain') {
+          audioEngineRef.current?.setSustain(active);
+          setSustain(active);
+          updateSettings({ sustainEnabled: active });
+        } else if (pedal === 'sostenuto') {
+          audioEngineRef.current?.setSostenuto(active);
+          setSostenuto(active);
+          updateSettings({ sostenutoEnabled: active });
+        } else if (pedal === 'soft') {
+          audioEngineRef.current?.setSoftPedal(active);
+          setSoftPedal(active);
+          updateSettings({ softPedalEnabled: active });
+        }
+      },
+      onPanicRelease: () => {
+        releaseAllNotes();
+      },
       onStatusChange: (status, deviceName) => {
         setMidiStatus(status);
         if (deviceName) setMidiDeviceName(deviceName);
+        if (status === 'disconnected') {
+          releaseAllNotes();
+        }
       },
     });
 
-    // Global mouseup to prevent stuck keys when mouse released outside the keyboard
+    // Global listeners for stuck note protection
     const handleGlobalMouseUp = () => {
       if (isMouseDownRef.current) {
         isMouseDownRef.current = false;
@@ -277,45 +389,92 @@ export function usePiano() {
       }
     };
 
+    const handleWindowBlur = () => {
+      releaseAllNotes();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        releaseAllNotes();
+      }
+    };
+
     window.addEventListener('mouseup', handleGlobalMouseUp);
+    window.addEventListener('blur', handleWindowBlur);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       window.removeEventListener('mouseup', handleGlobalMouseUp);
+      window.removeEventListener('blur', handleWindowBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
       audioEngineRef.current?.stopAllNotes();
       audioEngineRef.current?.stopMetronome();
       playbackEngineRef.current?.stop();
       midiControllerRef.current?.disconnect();
     };
-  }, []);
+  }, [releaseAllNotes, updateSettings]);
 
-  // Sync settings changes to storage & audio engine
-  const updateSettings = useCallback((updater: Partial<PianoSettings> | ((prev: PianoSettings) => PianoSettings)) => {
-    setSettings((prev) => {
-      const next = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
-      saveSettings(next);
-
-      if (audioEngineRef.current) {
-        if (next.volume !== prev.volume || next.isMuted !== prev.isMuted) {
-          audioEngineRef.current.setVolume(next.isMuted ? 0 : next.volume);
-        }
-        if (next.instrument !== prev.instrument) {
-          audioEngineRef.current.setInstrument(next.instrument);
-        }
-        if (next.sustainEnabled !== prev.sustainEnabled) {
-          audioEngineRef.current.setSustain(next.sustainEnabled);
-          setSustain(next.sustainEnabled);
-        }
-        if (next.metronomeBpm !== prev.metronomeBpm) {
-          audioEngineRef.current.updateMetronomeBpm(next.metronomeBpm);
-        }
-        if (next.transpose !== prev.transpose) {
-          audioEngineRef.current.setTranspose(next.transpose);
-        }
-        if (next.reverb !== prev.reverb) {
-          audioEngineRef.current.setReverb(next.reverb);
-        }
-      }
+  // Three-Pedal Toggles
+  const toggleSustain = useCallback(() => {
+    setSustain((prev) => {
+      const next = !prev;
+      audioEngineRef.current?.setSustain(next);
+      updateSettings({ sustainEnabled: next });
       return next;
     });
+  }, [updateSettings]);
+
+  const toggleSostenuto = useCallback(() => {
+    setSostenuto((prev) => {
+      const next = !prev;
+      audioEngineRef.current?.setSostenuto(next);
+      updateSettings({ sostenutoEnabled: next });
+      return next;
+    });
+  }, [updateSettings]);
+
+  const toggleSoftPedal = useCallback(() => {
+    setSoftPedal((prev) => {
+      const next = !prev;
+      audioEngineRef.current?.setSoftPedal(next);
+      updateSettings({ softPedalEnabled: next });
+      return next;
+    });
+  }, [updateSettings]);
+
+  // Sound Browser & Curation
+  const selectInstrument = useCallback(
+    (instId: InstrumentId) => {
+      const resolved = resolveInstrument(instId);
+      updateSettings((prev) => {
+        const recents = [resolved.id, ...(prev.recentSounds || []).filter((id) => id !== resolved.id)].slice(0, 8);
+        return {
+          ...prev,
+          instrument: resolved.id,
+          recentSounds: recents,
+        };
+      });
+      if (audioEngineRef.current) {
+        audioEngineRef.current.setInstrument(resolved.id);
+      }
+    },
+    [updateSettings]
+  );
+
+  const toggleFavoriteSound = useCallback(
+    (instId: InstrumentId) => {
+      updateSettings((prev) => {
+        const favs = prev.favoriteSounds || [];
+        const isFav = favs.includes(instId);
+        const updatedFavs = isFav ? favs.filter((id) => id !== instId) : [...favs, instId];
+        return { ...prev, favoriteSounds: updatedFavs };
+      });
+    },
+    [updateSettings]
+  );
+
+  const previewSound = useCallback((instId: InstrumentId) => {
+    audioEngineRef.current?.playPreviewPhrase(instId);
   }, []);
 
   // Practice Mode helpers
@@ -346,19 +505,12 @@ export function usePiano() {
     return settings.metronomeBpm;
   }, [settings.metronomeBpm, updateSettings]);
 
-  const panOctave = useCallback((targetOctave: number) => {
-    updateSettings({ baseOctave: Math.max(1, Math.min(6, targetOctave)) });
-  }, [updateSettings]);
-
-  // Sustain Pedal toggle
-  const toggleSustain = useCallback(() => {
-    setSustain((prev) => {
-      const next = !prev;
-      audioEngineRef.current?.setSustain(next);
-      updateSettings({ sustainEnabled: next });
-      return next;
-    });
-  }, [updateSettings]);
+  const panOctave = useCallback(
+    (targetOctave: number) => {
+      updateSettings({ baseOctave: Math.max(1, Math.min(6, targetOctave)) });
+    },
+    [updateSettings]
+  );
 
   // Metronome toggle
   const toggleMetronome = useCallback(() => {
@@ -434,7 +586,6 @@ export function usePiano() {
 
     const duration = Math.max(500, Math.round(performance.now() - recordingStartTimeRef.current));
 
-    // Close any unclosed note events
     recordedEventsRef.current.forEach((e) => {
       if (e.endTime === undefined) {
         e.endTime = duration;
@@ -444,10 +595,12 @@ export function usePiano() {
     if (recordedEventsRef.current.length > 0) {
       const newRec: Recording = {
         id: `rec_${Date.now()}`,
-        name: `Piano Recording ${recordings.length + 1}`,
+        name: `Studio Take ${recordings.length + 1}`,
         createdAt: Date.now(),
         duration,
         events: [...recordedEventsRef.current],
+        tempo: settings.metronomeBpm,
+        instrument: settings.instrument,
       };
 
       setRecordings((prev) => {
@@ -456,31 +609,37 @@ export function usePiano() {
         return updated;
       });
     }
-  }, [recordings.length]);
+  }, [recordings.length, settings.metronomeBpm, settings.instrument]);
 
-  const deleteRecording = useCallback((id: string) => {
-    if (activePlaybackId === id) {
-      playbackEngineRef.current?.stop();
-      setIsPlaying(false);
-      setActivePlaybackId(null);
-    }
-    setRecordings((prev) => {
-      const updated = prev.filter((r) => r.id !== id);
-      saveRecordings(updated);
-      return updated;
-    });
-  }, [activePlaybackId]);
+  const deleteRecording = useCallback(
+    (id: string) => {
+      if (activePlaybackId === id) {
+        playbackEngineRef.current?.stop();
+        setIsPlaying(false);
+        setActivePlaybackId(null);
+      }
+      setRecordings((prev) => {
+        const updated = prev.filter((r) => r.id !== id);
+        saveRecordings(updated);
+        return updated;
+      });
+    },
+    [activePlaybackId]
+  );
 
-  const playRecording = useCallback((recording: Recording) => {
-    ensureAudioUnlocked();
-    if (isRecordingRef.current) {
-      stopRecording();
-    }
-    setActivePlaybackId(recording.id);
-    setIsPlaying(true);
-    setIsPaused(false);
-    playbackEngineRef.current?.play(recording);
-  }, [ensureAudioUnlocked, stopRecording]);
+  const playRecording = useCallback(
+    (recording: Recording) => {
+      ensureAudioUnlocked();
+      if (isRecordingRef.current) {
+        stopRecording();
+      }
+      setActivePlaybackId(recording.id);
+      setIsPlaying(true);
+      setIsPaused(false);
+      playbackEngineRef.current?.play(recording);
+    },
+    [ensureAudioUnlocked, stopRecording]
+  );
 
   const pausePlayback = useCallback(() => {
     playbackEngineRef.current?.pause();
@@ -498,6 +657,10 @@ export function usePiano() {
     setIsPaused(false);
     setActivePlaybackId(null);
     setPlaybackProgressMs(0);
+  }, []);
+
+  const exportMidi = useCallback((recording: Recording) => {
+    downloadMidiFile(recording, recording.tempo || 120);
   }, []);
 
   // Filter visible keys based on baseOctave and visibleOctaves
@@ -543,6 +706,12 @@ export function usePiano() {
       if (e.code === 'Space') {
         e.preventDefault();
         toggleSustain();
+        return;
+      }
+
+      // Escape or Panic
+      if (e.key === 'Escape') {
+        releaseAllNotes();
         return;
       }
 
@@ -617,6 +786,7 @@ export function usePiano() {
     toggleMetronome,
     handleNoteStart,
     handleNoteStop,
+    releaseAllNotes,
   ]);
 
   return {
@@ -625,13 +795,20 @@ export function usePiano() {
     isAudioReady,
     audioStatusText,
     ensureAudioUnlocked,
+    releaseAllNotes,
     activeNotes,
     activeNoteNames,
     activeChordName,
     visibleKeys,
     keyboardMapping,
+    // Pedals
     sustain,
+    sostenuto,
+    softPedal,
     toggleSustain,
+    toggleSostenuto,
+    toggleSoftPedal,
+    // Metronome
     metronomeBeat,
     toggleMetronome,
     changeMetronomeBpm,
@@ -643,9 +820,12 @@ export function usePiano() {
     startRecording,
     stopRecording,
     deleteRecording,
+    exportMidi,
     // Playback
     isPlaying,
     isPaused,
+    isLooping,
+    setIsLooping,
     activePlaybackId,
     playbackProgressMs,
     playbackDurationMs,
@@ -653,6 +833,10 @@ export function usePiano() {
     pausePlayback,
     resumePlayback,
     stopPlayback,
+    // Sound Library
+    selectInstrument,
+    toggleFavoriteSound,
+    previewSound,
     // MIDI
     midiStatus,
     midiDeviceName,

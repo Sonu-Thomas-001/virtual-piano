@@ -50,6 +50,8 @@ interface ControlStripProps {
   onSelectScale: (scaleId: string) => void;
   practiceMode: boolean;
   onTogglePracticeMode: () => void;
+  onOpenSoundBrowser?: () => void;
+  onReleaseAllNotes?: () => void;
 }
 
 export function ControlStrip({
@@ -82,6 +84,8 @@ export function ControlStrip({
   onSelectScale,
   practiceMode,
   onTogglePracticeMode,
+  onOpenSoundBrowser,
+  onReleaseAllNotes,
 }: ControlStripProps) {
   const [instrumentMenuOpen, setInstrumentMenuOpen] = useState(false);
   const [rangeMenuOpen, setRangeMenuOpen] = useState(false);
@@ -145,9 +149,27 @@ export function ControlStrip({
           </button>
 
           {instrumentMenuOpen && (
-            <div className="absolute left-0 top-full mt-1.5 w-64 bg-[#18181b] border border-stone-700/90 rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95">
-              <div className="px-2.5 py-1 text-[10px] uppercase font-mono text-stone-400 tracking-wider">
-                Select Instrument (10 Studio Timbres)
+            <div className="absolute left-0 top-full mt-1.5 w-72 bg-[#18181b] border border-stone-700/90 rounded-xl shadow-2xl p-2 z-50 animate-in fade-in zoom-in-95">
+              {onOpenSoundBrowser && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInstrumentMenuOpen(false);
+                    onOpenSoundBrowser();
+                  }}
+                  className="w-full mb-2 p-2 rounded-lg bg-gradient-to-r from-amber-500/20 to-amber-600/10 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 flex items-center justify-between font-medium text-xs transition-colors shadow-sm"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Open Sound Library</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20">
+                    37 Voices
+                  </span>
+                </button>
+              )}
+              <div className="px-2 py-1 text-[10px] uppercase font-mono text-stone-400 tracking-wider">
+                Quick Select ({AVAILABLE_INSTRUMENTS.length} Voices)
               </div>
               <div className="flex flex-col gap-0.5 max-h-72 overflow-y-auto">
                 {AVAILABLE_INSTRUMENTS.map((inst) => (

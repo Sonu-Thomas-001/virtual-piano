@@ -3,16 +3,16 @@ import './globals.css'; // Global styles
 
 export const metadata: Metadata = {
   title: 'Virtual Piano - Digital Piano Studio',
-  description: 'A modern digital piano studio with realistic acoustic grand piano sound, full 88-key architecture, recording, metronome, and keyboard controls.',
+  description: 'A realistic browser-based digital piano and keyboard workstation featuring 37 studio instruments, physical acoustic modeling, 3-pedal system, MIDI export, and stage performance mode.',
   openGraph: {
     title: 'Virtual Piano - Digital Piano Studio',
-    description: 'A modern digital piano studio with realistic acoustic grand piano sound, full 88-key architecture, recording, metronome, and keyboard controls.',
+    description: 'A realistic browser-based digital piano and keyboard workstation featuring 37 studio instruments, physical acoustic modeling, 3-pedal system, MIDI export, and stage performance mode.',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Virtual Piano - Digital Piano Studio',
-    description: 'A modern digital piano studio with realistic acoustic grand piano sound, full 88-key architecture, recording, metronome, and keyboard controls.',
+    description: 'A realistic browser-based digital piano and keyboard workstation featuring 37 studio instruments, physical acoustic modeling, 3-pedal system, MIDI export, and stage performance mode.',
   },
 };
 

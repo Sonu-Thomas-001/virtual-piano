@@ -3,7 +3,9 @@ export type MidiStatus = 'unsupported' | 'disconnected' | 'connected' | 'request
 export interface MidiHandler {
   onNoteOn: (midi: number, velocity: number) => void;
   onNoteOff: (midi: number) => void;
+  onPedalChange?: (pedal: 'sustain' | 'sostenuto' | 'soft', active: boolean, value: number) => void;
   onStatusChange: (status: MidiStatus, deviceName?: string) => void;
+  onPanicRelease?: () => void;
 }
 
 interface LocalMIDIMessageEvent {
@@ -96,19 +98,47 @@ export class MidiController {
     if (!this.handlers || !event.data) return;
 
     const data = Array.from(event.data);
-    const [statusByte, noteByte, velocityByte] = data;
+    const [statusByte, data1, data2] = data;
     const command = statusByte >> 4;
 
-    // Command 9: Note On, Command 8: Note Off
+    // Command 9: Note On (0x9)
     if (command === 9) {
-      if (velocityByte > 0) {
-        this.handlers.onNoteOn(noteByte, velocityByte / 127);
+      const velocity = data2 / 127;
+      if (data2 > 0) {
+        this.handlers.onNoteOn(data1, velocity);
       } else {
-        // Velocity 0 note-on is treated as note-off by MIDI standard
-        this.handlers.onNoteOff(noteByte);
+        // Velocity 0 is note off per MIDI spec
+        this.handlers.onNoteOff(data1);
       }
-    } else if (command === 8) {
-      this.handlers.onNoteOff(noteByte);
+    }
+    // Command 8: Note Off (0x8)
+    else if (command === 8) {
+      this.handlers.onNoteOff(data1);
+    }
+    // Command 11: Control Change (0xB)
+    else if (command === 11) {
+      const controllerNumber = data1;
+      const controllerValue = data2;
+
+      // CC64: Sustain / Damper Pedal
+      if (controllerNumber === 64) {
+        const isDown = controllerValue >= 64;
+        this.handlers.onPedalChange?.('sustain', isDown, controllerValue);
+      }
+      // CC66: Sostenuto Pedal
+      else if (controllerNumber === 66) {
+        const isDown = controllerValue >= 64;
+        this.handlers.onPedalChange?.('sostenuto', isDown, controllerValue);
+      }
+      // CC67: Soft Pedal (Una Corda)
+      else if (controllerNumber === 67) {
+        const isDown = controllerValue >= 64;
+        this.handlers.onPedalChange?.('soft', isDown, controllerValue);
+      }
+      // CC120 / CC123: All Sound Off / All Notes Off (Panic)
+      else if (controllerNumber === 120 || controllerNumber === 123) {
+        this.handlers.onPanicRelease?.();
+      }
     }
   }
 

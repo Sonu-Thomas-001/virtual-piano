@@ -151,16 +151,33 @@ export function PianoKeyboard({
       onTouchCancel={handleTouchEnd}
     >
       {/* Keyboard Case Bed / Wood & Metal Trim */}
-      <div className="relative mx-auto max-w-full inline-flex flex-col bg-gradient-to-b from-[#141416] to-[#0a0a0c] p-2 sm:p-3 rounded-xl border border-stone-800/90 shadow-[0_20px_40px_rgba(0,0,0,0.8),inset_0_1px_1px_rgba(255,255,255,0.06)]">
+      <div className="relative mx-auto max-w-full inline-flex flex-col bg-gradient-to-b from-[#18181c] via-[#121215] to-[#070709] p-2.5 sm:p-4 rounded-2xl border border-stone-800/90 shadow-[0_25px_60px_rgba(0,0,0,0.9),inset_0_1px_1px_rgba(255,255,255,0.08)]">
         
-        {/* Felt Red Strip at Keybed Junction (Acoustic Grand Piano signature felt) */}
-        <div className="h-1.5 w-full bg-gradient-to-r from-red-900 via-red-700 to-red-900 rounded-t-sm shadow-[inset_0_1px_1px_rgba(0,0,0,0.8)] mb-[-1px] z-30" />
+        {/* Top Fallboard & Brand Inlay */}
+        <div className="flex items-center justify-between px-3 py-1 mb-1.5 border-b border-stone-800/60 text-stone-500">
+          <div className="w-8 sm:w-16 h-1 bg-stone-800 rounded-full" />
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-amber-500/80 shadow-[0_0_6px_#f59e0b]" />
+            <span className="font-mono text-[9px] sm:text-[11px] tracking-[0.2em] sm:tracking-[0.25em] text-amber-500/90 font-bold uppercase">
+              VIRTUAL PIANO STUDIO · CONCERT MASTER
+            </span>
+            <div className="w-1.5 h-1.5 rounded-full bg-amber-500/80 shadow-[0_0_6px_#f59e0b]" />
+          </div>
+          <div className="w-8 sm:w-16 h-1 bg-stone-800 rounded-full" />
+        </div>
 
-        {/* The Keys Row */}
-        <div
-          id="piano-keys-row"
-          className="relative flex flex-row items-start min-w-max justify-start px-0.5"
-        >
+        {/* Felt Red Strip at Keybed Junction (Acoustic Grand Piano signature felt) */}
+        <div className="h-2 w-full bg-gradient-to-r from-red-950 via-red-800 to-red-950 rounded-t-sm shadow-[inset_0_1px_2px_rgba(0,0,0,0.9),0_1px_2px_rgba(0,0,0,0.8)] mb-[-1px] z-30 border-b border-red-900/40" />
+
+        {/* The Keys Row with side cheeks */}
+        <div className="relative flex items-stretch">
+          {/* Left Wood Cheek Block */}
+          <div className="w-3 sm:w-4 bg-gradient-to-r from-[#1c1c22] to-[#121216] rounded-l-md border-r border-stone-900 shadow-[inset_1px_0_1px_rgba(255,255,255,0.06)] shrink-0 z-20" />
+
+          <div
+            id="piano-keys-row"
+            className="relative flex flex-row items-start min-w-max justify-start px-0.5"
+          >
           {whiteKeyGroups.map(({ whiteKey, blackKey }) => {
             const isWhiteActive = activeNotes.has(whiteKey.midi);
             const isBlackActive = blackKey ? activeNotes.has(blackKey.midi) : false;
@@ -189,8 +206,8 @@ export function PianoKeyboard({
                   keyLabelDisplay={keyLabels}
                   isScaleHighlight={isWhiteInScale}
                   isPracticeTarget={isWhitePracticeTarget}
-                  onNoteStart={onNoteStart}
-                  onNoteStop={onNoteStop}
+                  onNoteStart={(midi, vel) => onNoteStart(midi, vel, 'mouse')}
+                  onNoteStop={(midi) => onNoteStop(midi, 'mouse')}
                 />
 
                 {/* Attached Black Key (Centered on the seam with translate-x-1/2) */}
@@ -207,14 +224,18 @@ export function PianoKeyboard({
                       keyLabelDisplay={keyLabels}
                       isScaleHighlight={isBlackInScale}
                       isPracticeTarget={isBlackPracticeTarget}
-                      onNoteStart={onNoteStart}
-                      onNoteStop={onNoteStop}
+                      onNoteStart={(midi, vel) => onNoteStart(midi, vel, 'mouse')}
+                      onNoteStop={(midi) => onNoteStop(midi, 'mouse')}
                     />
                   </div>
                 )}
               </div>
             );
           })}
+          </div>
+
+          {/* Right Wood Cheek Block */}
+          <div className="w-3 sm:w-4 bg-gradient-to-l from-[#1c1c22] to-[#121216] rounded-r-md border-l border-stone-900 shadow-[inset_-1px_0_1px_rgba(255,255,255,0.06)] shrink-0 z-20" />
         </div>
 
         {/* Lower Keybed Lip */}

@@ -11,6 +11,10 @@ import {
   Play,
   Piano,
   Activity,
+  Sparkles,
+  AlertOctagon,
+  Layers,
+  Sliders,
 } from 'lucide-react';
 import { InstrumentId } from '@/types/piano';
 import { AVAILABLE_INSTRUMENTS } from '@/lib/constants';
@@ -34,6 +38,11 @@ interface TopBarProps {
   onOpenHelp: () => void;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
+  onOpenSoundBrowser?: () => void;
+  onOpenControlsDrawer?: () => void;
+  onReleaseAllNotes?: () => void;
+  performanceMode?: boolean;
+  onTogglePerformanceMode?: () => void;
 }
 
 export function TopBar({
@@ -55,6 +64,11 @@ export function TopBar({
   onOpenHelp,
   isFullscreen,
   onToggleFullscreen,
+  onOpenSoundBrowser,
+  onOpenControlsDrawer,
+  onReleaseAllNotes,
+  performanceMode = false,
+  onTogglePerformanceMode,
 }: TopBarProps) {
   const [showVolumePopup, setShowVolumePopup] = useState(false);
   const volumeRef = useRef<HTMLDivElement>(null);
@@ -182,7 +196,66 @@ export function TopBar({
       </div>
 
       {/* RIGHT: Master Volume, Settings, Help, Fullscreen */}
-      <div className="flex items-center gap-1 sm:gap-2">
+      <div className="flex items-center gap-1 sm:gap-1.5">
+        {/* Sound Library Button */}
+        {onOpenSoundBrowser && (
+          <button
+            id="open-sound-browser-topbar"
+            type="button"
+            onClick={onOpenSoundBrowser}
+            title="Browse All 37 Studio Voices"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-medium transition-colors"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Sounds</span>
+          </button>
+        )}
+
+        {/* Acoustics & Modeling Drawer */}
+        {onOpenControlsDrawer && (
+          <button
+            id="open-fx-drawer-topbar"
+            type="button"
+            onClick={onOpenControlsDrawer}
+            title="Piano Acoustics, EQ, Brightness, Reverb & Tuning"
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-stone-900 border border-stone-800 hover:border-amber-500/40 text-stone-300 hover:text-amber-300 text-xs font-medium transition-colors"
+          >
+            <Sliders className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Acoustics</span>
+          </button>
+        )}
+
+        {/* Performance / Stage Mode Toggle */}
+        {onTogglePerformanceMode && (
+          <button
+            id="performance-mode-toggle"
+            type="button"
+            onClick={onTogglePerformanceMode}
+            title={performanceMode ? 'Exit Performance Mode' : 'Enter Performance Mode (Focus on Piano)'}
+            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              performanceMode
+                ? 'bg-purple-950/80 border-purple-500/60 text-purple-300'
+                : 'bg-stone-900 border-stone-800 text-stone-400 hover:text-stone-200'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">{performanceMode ? 'Stage On' : 'Stage'}</span>
+          </button>
+        )}
+
+        {/* Audio Panic / Stuck Note Killer */}
+        {onReleaseAllNotes && (
+          <button
+            id="panic-reset-button"
+            type="button"
+            onClick={onReleaseAllNotes}
+            title="Panic: Kill stuck notes and release all voices"
+            className="p-2 rounded-lg text-stone-400 hover:text-red-400 hover:bg-red-950/40 hover:border-red-800 border border-transparent transition-all"
+          >
+            <AlertOctagon className="w-4 h-4" />
+          </button>
+        )}
+
         {/* Volume Control */}
         <div className="relative" ref={volumeRef}>
           <button
