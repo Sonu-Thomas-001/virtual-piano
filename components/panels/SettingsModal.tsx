@@ -11,9 +11,11 @@ import {
   Radio,
   Clock,
   Check,
+  Waves,
+  Music2,
 } from 'lucide-react';
-import { PianoSettings, InstrumentId, KeyLabelDisplay } from '@/types/piano';
-import { AVAILABLE_INSTRUMENTS } from '@/lib/constants';
+import { PianoSettings, InstrumentId, KeyLabelDisplay, ReverbPreset } from '@/types/piano';
+import { AVAILABLE_INSTRUMENTS, AVAILABLE_REVERBS, SCALES_LIST } from '@/lib/constants';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -75,7 +77,7 @@ export function SettingsModal({
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2 text-xs font-mono text-amber-400 uppercase tracking-wider">
             <Volume2 className="w-3.5 h-3.5" />
-            <span>Audio Configuration</span>
+            <span>Audio & FX Engine</span>
           </div>
 
           <div className="bg-stone-900/90 border border-stone-800 rounded-xl p-3.5 flex flex-col gap-3">
@@ -98,8 +100,70 @@ export function SettingsModal({
               />
             </div>
 
+            {/* Reverb Acoustics */}
+            <div className="flex flex-col gap-1.5 pt-2 border-t border-stone-800">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-stone-300 flex items-center gap-1.5">
+                  <Waves className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Acoustic Space Reverb</span>
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                {AVAILABLE_REVERBS.map((r) => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => onUpdateSettings({ reverb: r.id })}
+                    className={`
+                      px-2 py-1.5 rounded-lg border text-xs text-center transition-all
+                      ${
+                        settings.reverb === r.id
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-semibold'
+                          : 'bg-stone-800/60 border-stone-700/60 text-stone-400 hover:bg-stone-800'
+                      }
+                    `}
+                  >
+                    {r.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Transpose */}
+            <div className="flex items-center justify-between pt-2 border-t border-stone-800 text-xs text-stone-300">
+              <span>Master Pitch Transpose:</span>
+              <div className="flex items-center gap-2 font-mono">
+                <button
+                  type="button"
+                  onClick={() => onUpdateSettings({ transpose: Math.max(-12, (settings.transpose ?? 0) - 1) })}
+                  className="px-2 py-0.5 rounded bg-stone-800 hover:bg-stone-700 text-stone-300"
+                >
+                  -
+                </button>
+                <span className="text-amber-400 font-bold min-w-[32px] text-center">
+                  {(settings.transpose ?? 0) > 0 ? `+${settings.transpose}` : settings.transpose ?? 0}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onUpdateSettings({ transpose: Math.min(12, (settings.transpose ?? 0) + 1) })}
+                  className="px-2 py-0.5 rounded bg-stone-800 hover:bg-stone-700 text-stone-300"
+                >
+                  +
+                </button>
+                {(settings.transpose ?? 0) !== 0 && (
+                  <button
+                    type="button"
+                    onClick={() => onUpdateSettings({ transpose: 0 })}
+                    className="text-[10px] text-stone-400 hover:text-stone-200 underline ml-1"
+                  >
+                    Reset
+                  </button>
+                )}
+              </div>
+            </div>
+
             {/* Instrument Selection */}
-            <div className="flex flex-col gap-1.5 pt-1 border-t border-stone-800">
+            <div className="flex flex-col gap-1.5 pt-2 border-t border-stone-800">
               <span className="text-xs text-stone-300">Active Sound Model</span>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                 {AVAILABLE_INSTRUMENTS.map((inst) => (
@@ -127,7 +191,7 @@ export function SettingsModal({
             <div className="flex items-center justify-between pt-1 border-t border-stone-800 text-[11px] font-mono text-stone-400">
               <div className="flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-stone-400" />
-                <span>Base Audio Latency:</span>
+                <span>Audio Engine Latency:</span>
               </div>
               <span className="text-emerald-400 font-semibold">{audioLatencyMs * 1000} ms</span>
             </div>

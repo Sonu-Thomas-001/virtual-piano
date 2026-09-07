@@ -6,6 +6,9 @@ import { useFullscreen } from '@/hooks/useFullscreen';
 import { TopBar } from '@/components/controls/TopBar';
 import { ControlStrip } from '@/components/controls/ControlStrip';
 import { PianoKeyboard } from '@/components/piano/PianoKeyboard';
+import { VisualizerBar } from '@/components/piano/VisualizerBar';
+import { PracticeModeOverlay } from '@/components/piano/PracticeModeOverlay';
+import { MiniPianoNavigator } from '@/components/piano/MiniPianoNavigator';
 import { SustainPedal } from '@/components/controls/SustainPedal';
 import { RecordingModal } from '@/components/panels/RecordingModal';
 import { SettingsModal } from '@/components/panels/SettingsModal';
@@ -54,6 +57,17 @@ export default function PianoStudioPage() {
     handleNoteStart,
     handleNoteStop,
     isMouseDownRef,
+    // Practice Mode
+    practiceSteps,
+    practiceCurrentStepIndex,
+    currentPracticeTarget,
+    practiceCompleted,
+    resetPractice,
+    nextPracticeScale,
+    // Tools & FX
+    tapTempo,
+    panOctave,
+    audioEngineRef,
   } = usePiano();
 
   const { isFullscreen, toggleFullscreen } = useFullscreen();
@@ -115,34 +129,20 @@ export default function PianoStudioPage() {
       {/* 2. MAIN PIANO WORKSPACE */}
       <main
         id="main-piano-workspace"
-        className="flex-1 w-full flex flex-col items-center justify-between py-2 sm:py-4 px-2 sm:px-6 max-w-7xl mx-auto"
+        className="flex-1 w-full flex flex-col items-center justify-between py-2 px-2 sm:px-6 max-w-7xl mx-auto gap-2"
       >
-        {/* Subtle Minimal Hero Tag */}
-        <div className="w-full flex items-center justify-between px-2 pt-1 pb-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xs sm:text-sm font-semibold tracking-wider text-stone-300 uppercase">
-              Virtual Piano
-            </span>
-            <span className="text-xs text-stone-500 hidden md:inline">
-              — Play naturally. Anywhere.
-            </span>
-          </div>
+        {/* Studio Real-Time Spectrum & Activity Visualizer Bar */}
+        <VisualizerBar
+          activeNotes={activeNotes}
+          activeChordName={activeChordName}
+          activeNoteNames={activeNoteNames}
+          audioEngineRef={audioEngineRef}
+          sustain={sustain}
+          isRecording={isRecording}
+          isPlaying={isPlaying}
+        />
 
-          {/* First Load Audio Prompt */}
-          {!isAudioReady && (
-            <div className="text-[11px] font-mono text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20 animate-pulse">
-              Click any key to start
-            </div>
-          )}
-
-          {isAudioReady && (
-            <div className="text-[11px] font-mono text-stone-400">
-              Audio ready
-            </div>
-          )}
-        </div>
-
-        {/* Compact Control Strip */}
+        {/* Compact Studio Control Strip */}
         <div className="w-full">
           <ControlStrip
             currentInstrument={settings.instrument}
@@ -158,6 +158,7 @@ export default function PianoStudioPage() {
             metronomeBeat={metronomeBeat}
             onToggleMetronome={toggleMetronome}
             onChangeBpm={changeMetronomeBpm}
+            onTapTempo={tapTempo}
             isRecording={isRecording}
             onStartRecording={startRecording}
             onStopRecording={stopRecording}
@@ -165,11 +166,32 @@ export default function PianoStudioPage() {
             onOpenRecordingsModal={() => setRecordingsOpen(true)}
             keyLabels={settings.keyLabels}
             onToggleKeyLabels={handleToggleKeyLabels}
+            transpose={settings.transpose ?? 0}
+            onChangeTranspose={(tr) => updateSettings({ transpose: tr })}
+            reverb={settings.reverb ?? 'off'}
+            onSelectReverb={(rev) => updateSettings({ reverb: rev })}
+            activeScale={settings.activeScale ?? 'none'}
+            onSelectScale={(sc) => updateSettings({ activeScale: sc })}
+            practiceMode={Boolean(settings.practiceMode)}
+            onTogglePracticeMode={() => updateSettings({ practiceMode: !settings.practiceMode })}
           />
         </div>
 
+        {/* Practice Mode Interactive Trainer Bar (Conditional) */}
+        {settings.practiceMode && (
+          <PracticeModeOverlay
+            practiceScale={settings.practiceScale || 'c-major'}
+            practiceSteps={practiceSteps}
+            practiceCurrentStepIndex={practiceCurrentStepIndex}
+            practiceCompleted={practiceCompleted}
+            onReset={resetPractice}
+            onNextScale={nextPracticeScale}
+            onClose={() => updateSettings({ practiceMode: false })}
+          />
+        )}
+
         {/* Real Piano Keyboard Area */}
-        <div className="w-full my-auto py-2 sm:py-4 flex justify-center">
+        <div className="w-full my-auto py-1 sm:py-2 flex justify-center">
           <PianoKeyboard
             visibleKeys={visibleKeys}
             activeNotes={activeNotes}
@@ -177,13 +199,23 @@ export default function PianoStudioPage() {
             keyboardMapping={keyboardMapping}
             keyLabels={settings.keyLabels}
             baseOctave={settings.baseOctave}
+            activeScale={settings.activeScale}
+            practiceTargetMidi={settings.practiceMode ? currentPracticeTarget?.midi : null}
             onNoteStart={handleNoteStart}
             onNoteStop={handleNoteStop}
           />
         </div>
 
+        {/* Mini 88-Key Navigator & Viewport Slider */}
+        <MiniPianoNavigator
+          baseOctave={settings.baseOctave}
+          visibleOctaves={settings.visibleOctaves}
+          onNavigateOctave={(oct) => panOctave(oct)}
+          activeNotes={activeNotes}
+        />
+
         {/* Bottom Utility Bar: Sustain Pedal & Help Hint */}
-        <div className="w-full flex items-center justify-between px-2 pt-2 pb-1 gap-4 flex-wrap">
+        <div className="w-full flex items-center justify-between px-2 pt-1 pb-1 gap-4 flex-wrap">
           {/* Quick shortcuts hint */}
           <div className="hidden sm:flex items-center gap-3 text-[11px] font-mono text-stone-400">
             <span className="flex items-center gap-1">
@@ -197,6 +229,9 @@ export default function PianoStudioPage() {
             </span>
             <span className="flex items-center gap-1">
               <kbd className="px-1.5 py-0.5 rounded bg-stone-900 border border-stone-800 text-stone-300">R</kbd> Record
+            </span>
+            <span className="flex items-center gap-1">
+              <kbd className="px-1.5 py-0.5 rounded bg-stone-900 border border-stone-800 text-stone-300">M</kbd> Metronome
             </span>
           </div>
 

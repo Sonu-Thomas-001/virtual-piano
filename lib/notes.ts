@@ -163,3 +163,73 @@ export function detectChord(activeMidis: number[]): string | null {
   // Return note names joined if not standard chord
   return null;
 }
+
+/**
+ * Returns set of note pitch class names (e.g. Set(['C', 'D', 'E', ...])) for a given scale ID.
+ */
+export function getScalePitchClasses(scaleId: string): Set<string> {
+  const scaleMap: Record<string, string[]> = {
+    'none': ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'],
+    'c-major': ['C', 'D', 'E', 'F', 'G', 'A', 'B'],
+    'g-major': ['G', 'A', 'B', 'C', 'D', 'E', 'F#'],
+    'd-major': ['D', 'E', 'F#', 'G', 'A', 'B', 'C#'],
+    'f-major': ['F', 'G', 'A', 'A#', 'C', 'D', 'E'],
+    'a-minor': ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+    'e-minor': ['E', 'F#', 'G', 'A', 'B', 'C', 'D'],
+    'pentatonic-major': ['C', 'D', 'E', 'G', 'A'],
+    'blues-c': ['C', 'D#', 'F', 'F#', 'G', 'A#'],
+  };
+
+  const list = scaleMap[scaleId] || scaleMap['c-major'];
+  return new Set(list);
+}
+
+export interface PracticeStep {
+  midi: number;
+  name: string;
+  index: number;
+}
+
+/**
+ * Generates an ascending scale practice target sequence for a given scale and octave.
+ */
+export function getScalePracticeSequence(scaleId: string, baseOctave: number): PracticeStep[] {
+  const pitchClasses = Array.from(getScalePitchClasses(scaleId === 'none' ? 'c-major' : scaleId));
+  const octave = Math.max(2, Math.min(5, baseOctave));
+
+  // Build notes ascending starting from root pitch
+  const steps: PracticeStep[] = [];
+  const rootName = pitchClasses[0];
+
+  // Find root MIDI in current octave
+  const startMidi = noteNameToMidi(`${rootName}${octave}`);
+  
+  // Collect 8-10 sequence steps
+  let currentMidi = startMidi;
+  let targetOctave = octave;
+
+  pitchClasses.forEach((pName, idx) => {
+    const midi = noteNameToMidi(`${pName}${targetOctave}`);
+    const actualMidi = midi < startMidi ? midi + 12 : midi;
+    steps.push({
+      midi: actualMidi,
+      name: midiToNoteName(actualMidi).fullName,
+      index: idx,
+    });
+  });
+
+  // Add the final root octave resolution (e.g. C5 if started at C4)
+  const topOctaveMidi = startMidi + 12;
+  steps.push({
+    midi: topOctaveMidi,
+    name: midiToNoteName(topOctaveMidi).fullName,
+    index: steps.length,
+  });
+
+  // Sort ascending by MIDI
+  steps.sort((a, b) => a.midi - b.midi);
+  steps.forEach((s, idx) => (s.index = idx));
+
+  return steps;
+}
+

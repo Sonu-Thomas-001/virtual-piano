@@ -13,7 +13,10 @@ import {
   assignKeyboardShortcuts,
   detectChord,
   midiToNoteName,
+  getScalePracticeSequence,
+  PracticeStep,
 } from '@/lib/notes';
+import { SCALES_LIST } from '@/lib/constants';
 import { AudioEngine } from '@/lib/audio/AudioEngine';
 import { MidiController, MidiStatus } from '@/lib/midi';
 import { PlaybackEngine } from '@/lib/recording/PlaybackEngine';
@@ -27,6 +30,10 @@ export function usePiano() {
 
   // Active notes currently pressed/sounding: Map of midi -> ActiveNoteState
   const [activeNotes, setActiveNotes] = useState<Map<number, ActiveNoteState>>(new Map());
+
+  // Practice Mode state
+  const [practiceCurrentStepIndex, setPracticeCurrentStepIndex] = useState<number>(0);
+  const [practiceCompleted, setPracticeCompleted] = useState<boolean>(false);
 
   // Sustain state
   const [sustain, setSustain] = useState<boolean>(false);
@@ -70,6 +77,17 @@ export function usePiano() {
   // Keys currently held down on physical computer keyboard (to prevent OS key repeat)
   const physicalKeysHeldRef = useRef<Set<string>>(new Set());
 
+  // Practice steps computed for the current practice scale
+  const practiceSteps = useMemo<PracticeStep[]>(() => {
+    return getScalePracticeSequence(settings.practiceScale || 'c-major', settings.baseOctave);
+  }, [settings.practiceScale, settings.baseOctave]);
+
+  // Keep practice step in bounds
+  const currentPracticeTarget = useMemo<PracticeStep | null>(() => {
+    if (!settings.practiceMode || practiceSteps.length === 0) return null;
+    return practiceSteps[Math.min(practiceCurrentStepIndex, practiceSteps.length - 1)] || null;
+  }, [settings.practiceMode, practiceSteps, practiceCurrentStepIndex]);
+
   // Unlock audio on first user gesture
   const ensureAudioUnlocked = useCallback(async () => {
     if (!audioEngineRef.current) return;
@@ -100,6 +118,18 @@ export function usePiano() {
         return next;
       });
 
+      // Advance Practice Mode if active note matches target
+      if (settings.practiceMode && !practiceCompleted && practiceSteps.length > 0) {
+        const target = practiceSteps[practiceCurrentStepIndex];
+        if (target && target.midi === midi) {
+          if (practiceCurrentStepIndex + 1 < practiceSteps.length) {
+            setPracticeCurrentStepIndex((idx) => idx + 1);
+          } else {
+            setPracticeCompleted(true);
+          }
+        }
+      }
+
       // Capture recording event if recording
       if (isRecordingRef.current) {
         const now = performance.now();
@@ -112,7 +142,7 @@ export function usePiano() {
         });
       }
     },
-    [ensureAudioUnlocked]
+    [ensureAudioUnlocked, settings.practiceMode, practiceCompleted, practiceSteps, practiceCurrentStepIndex]
   );
 
   // Release Note Event Handler
@@ -172,6 +202,8 @@ export function usePiano() {
         audioEngineRef.current?.setMute(savedSettings.isMuted);
         audioEngineRef.current?.setInstrument(savedSettings.instrument);
         audioEngineRef.current?.setSustain(savedSettings.sustainEnabled);
+        audioEngineRef.current?.setTranspose(savedSettings.transpose ?? 0);
+        audioEngineRef.current?.setReverb(savedSettings.reverb ?? 'hall');
 
         const savedRecs = loadRecordings();
         setRecordings(savedRecs);
@@ -275,10 +307,48 @@ export function usePiano() {
         if (next.metronomeBpm !== prev.metronomeBpm) {
           audioEngineRef.current.updateMetronomeBpm(next.metronomeBpm);
         }
+        if (next.transpose !== prev.transpose) {
+          audioEngineRef.current.setTranspose(next.transpose);
+        }
+        if (next.reverb !== prev.reverb) {
+          audioEngineRef.current.setReverb(next.reverb);
+        }
       }
       return next;
     });
   }, []);
+
+  // Practice Mode helpers
+  const resetPractice = useCallback(() => {
+    setPracticeCurrentStepIndex(0);
+    setPracticeCompleted(false);
+  }, []);
+
+  const nextPracticeScale = useCallback(() => {
+    const validScales = SCALES_LIST.filter((s) => s.id !== 'none');
+    setSettings((prev) => {
+      const currentIndex = validScales.findIndex((s) => s.id === prev.practiceScale);
+      const nextScale = validScales[(currentIndex + 1) % validScales.length];
+      const next = { ...prev, practiceScale: nextScale.id };
+      saveSettings(next);
+      return next;
+    });
+    setPracticeCurrentStepIndex(0);
+    setPracticeCompleted(false);
+  }, []);
+
+  const tapTempo = useCallback(() => {
+    if (audioEngineRef.current) {
+      const newBpm = audioEngineRef.current.tapTempo();
+      updateSettings({ metronomeBpm: newBpm });
+      return newBpm;
+    }
+    return settings.metronomeBpm;
+  }, [settings.metronomeBpm, updateSettings]);
+
+  const panOctave = useCallback((targetOctave: number) => {
+    updateSettings({ baseOctave: Math.max(1, Math.min(6, targetOctave)) });
+  }, [updateSettings]);
 
   // Sustain Pedal toggle
   const toggleSustain = useCallback(() => {
@@ -590,5 +660,16 @@ export function usePiano() {
     handleNoteStart,
     handleNoteStop,
     isMouseDownRef,
+    // Practice Mode
+    practiceSteps,
+    practiceCurrentStepIndex,
+    currentPracticeTarget,
+    practiceCompleted,
+    resetPractice,
+    nextPracticeScale,
+    // Tools & FX
+    tapTempo,
+    panOctave,
+    audioEngineRef,
   };
 }

@@ -16,14 +16,19 @@ export interface PianoNote {
 export type InstrumentId = 
   | 'acoustic-grand'
   | 'bright-piano'
+  | 'upright-piano'
+  | 'soft-piano'
   | 'electric-piano'
+  | 'wurlitzer'
   | 'pipe-organ'
-  | 'strings-pad';
+  | 'jazz-organ'
+  | 'strings-pad'
+  | 'analog-synth';
 
 export interface InstrumentInfo {
   id: InstrumentId;
   name: string;
-  category: string;
+  category: 'Acoustic' | 'Electric' | 'Organ' | 'Ensemble & Synth';
   description: string;
   icon: string;
 }
@@ -46,18 +51,25 @@ export interface Recording {
 
 export type KeyLabelDisplay = 'both' | 'notes' | 'shortcuts' | 'none';
 
+export type ReverbPreset = 'off' | 'room' | 'hall' | 'cathedral';
+
 export interface PianoSettings {
   volume: number; // 0 to 1
   isMuted: boolean;
   instrument: InstrumentId;
   baseOctave: number; // Center octave, typically 3 or 4 (default: 3, showing C3-B4 for 2 octaves)
-  visibleOctaves: number; // 2, 3, 4, or 7 (88-key)
+  visibleOctaves: number; // 2, 3, 4, 5, or 7 (88-key)
   keyLabels: KeyLabelDisplay;
   sustainEnabled: boolean;
   metronomeBpm: number;
   metronomeEnabled: boolean;
   metronomeTimeSignature: number; // e.g. 4 for 4/4
   latencyPreference: 'low' | 'balanced';
+  transpose: number; // -12 to +12 semitones
+  reverb: ReverbPreset;
+  activeScale: string; // 'none' | 'c-major' | etc.
+  practiceMode: boolean;
+  practiceScale: string;
 }
 
 export interface ActiveNoteState {

@@ -7,7 +7,7 @@ export const DEFAULT_SETTINGS: PianoSettings = {
   volume: 0.8,
   isMuted: false,
   instrument: 'acoustic-grand',
-  baseOctave: 3, // C3-B4 visible range by default for 2-3 octaves
+  baseOctave: 3, // C3-B5 visible range by default for 3 octaves
   visibleOctaves: 3,
   keyLabels: 'both',
   sustainEnabled: false,
@@ -15,6 +15,11 @@ export const DEFAULT_SETTINGS: PianoSettings = {
   metronomeEnabled: false,
   metronomeTimeSignature: 4,
   latencyPreference: 'low',
+  transpose: 0,
+  reverb: 'hall',
+  activeScale: 'none',
+  practiceMode: false,
+  practiceScale: 'c-major',
 };
 
 export function loadSettings(): PianoSettings {

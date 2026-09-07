@@ -1,8 +1,9 @@
-import { InstrumentId } from '@/types/piano';
+import { InstrumentId, ReverbPreset } from '@/types/piano';
 import { midiToFrequency, noteNameToMidi } from '@/lib/notes';
 
 interface ActiveVoice {
   midi: number;
+  transposedMidi: number;
   oscillators: OscillatorNode[];
   gainNodes: GainNode[];
   filterNode?: BiquadFilterNode;
@@ -20,7 +21,17 @@ export class AudioEngine {
   private compressor: DynamicsCompressorNode | null = null;
   private hammerNoiseBuffer: AudioBuffer | null = null;
 
-  // Active voices keyed by MIDI number
+  // Reverb chain
+  private convolver: ConvolverNode | null = null;
+  private reverbWetGain: GainNode | null = null;
+  private reverbDryGain: GainNode | null = null;
+  private currentReverb: ReverbPreset = 'hall';
+
+  // Analyser node for visualizer & activity meter
+  private analyser: AnalyserNode | null = null;
+  private analyserDataArray: Uint8Array | null = null;
+
+  // Active voices keyed by original MIDI number
   private activeVoices = new Map<number, ActiveVoice[]>();
 
   // State
@@ -29,6 +40,7 @@ export class AudioEngine {
   private isMuted: boolean = false;
   private sustainPedal: boolean = false;
   private isInitialized: boolean = false;
+  private transposeSemitones: number = 0;
 
   // Metronome timer state
   private metronomeTimerId: number | null = null;
@@ -36,6 +48,9 @@ export class AudioEngine {
   private metronomeTimeSignature: number = 4;
   private metronomeCurrentBeat: number = 0;
   private onMetronomeBeatCallback?: (beat: number) => void;
+
+  // Tap Tempo history
+  private tapTimestamps: number[] = [];
 
   private constructor() {
     // Lazy initialized on first user gesture
@@ -73,13 +88,37 @@ export class AudioEngine {
       this.compressor.attack.setValueAtTime(0.003, this.ctx.currentTime);
       this.compressor.release.setValueAtTime(0.15, this.ctx.currentTime);
 
+      // Reverb Bus
+      this.convolver = this.ctx.createConvolver();
+      this.reverbWetGain = this.ctx.createGain();
+      this.reverbDryGain = this.ctx.createGain();
+
+      this.updateReverbImpulse(this.currentReverb);
+
       // Master Gain
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
 
-      // Chain
-      this.compressor.connect(this.masterGain);
-      this.masterGain.connect(this.ctx.destination);
+      // Analyser for real-time waveform / visualizer
+      this.analyser = this.ctx.createAnalyser();
+      this.analyser.fftSize = 64;
+      this.analyser.smoothingTimeConstant = 0.8;
+      this.analyserDataArray = new Uint8Array(this.analyser.frequencyBinCount);
+
+      // Signal Chain:
+      // Voice -> Compressor
+      // Compressor -> DryGain -> MasterGain
+      // Compressor -> Convolver -> WetGain -> MasterGain
+      // MasterGain -> Analyser -> Destination
+      this.compressor.connect(this.reverbDryGain);
+      this.reverbDryGain.connect(this.masterGain);
+
+      this.compressor.connect(this.convolver);
+      this.convolver.connect(this.reverbWetGain);
+      this.reverbWetGain.connect(this.masterGain);
+
+      this.masterGain.connect(this.analyser);
+      this.analyser.connect(this.ctx.destination);
 
       // Generate realistic felt hammer noise buffer
       this.hammerNoiseBuffer = this.createHammerNoiseBuffer(this.ctx);
@@ -106,6 +145,85 @@ export class AudioEngine {
       data[i] = (Math.random() * 2 - 1) * decay;
     }
     return buffer;
+  }
+
+  private createImpulseResponse(seconds: number, decayRate: number): AudioBuffer | null {
+    if (!this.ctx) return null;
+    const rate = this.ctx.sampleRate;
+    const length = Math.floor(rate * seconds);
+    const impulse = this.ctx.createBuffer(2, length, rate);
+    const left = impulse.getChannelData(0);
+    const right = impulse.getChannelData(1);
+
+    for (let i = 0; i < length; i++) {
+      const n = length - i;
+      const decay = Math.pow(n / length, decayRate);
+      left[i] = (Math.random() * 2 - 1) * decay;
+      right[i] = (Math.random() * 2 - 1) * decay;
+    }
+    return impulse;
+  }
+
+  public setReverb(preset: ReverbPreset): void {
+    this.currentReverb = preset;
+    if (!this.ctx) return;
+    this.updateReverbImpulse(preset);
+  }
+
+  private updateReverbImpulse(preset: ReverbPreset): void {
+    if (!this.ctx || !this.convolver || !this.reverbWetGain || !this.reverbDryGain) return;
+    const now = this.ctx.currentTime;
+
+    switch (preset) {
+      case 'off':
+        this.reverbWetGain.gain.setTargetAtTime(0, now, 0.02);
+        this.reverbDryGain.gain.setTargetAtTime(1.0, now, 0.02);
+        break;
+
+      case 'room': {
+        const buf = this.createImpulseResponse(1.2, 3.5);
+        if (buf) this.convolver.buffer = buf;
+        this.reverbWetGain.gain.setTargetAtTime(0.22, now, 0.02);
+        this.reverbDryGain.gain.setTargetAtTime(0.95, now, 0.02);
+        break;
+      }
+
+      case 'cathedral': {
+        const buf = this.createImpulseResponse(4.2, 1.8);
+        if (buf) this.convolver.buffer = buf;
+        this.reverbWetGain.gain.setTargetAtTime(0.55, now, 0.02);
+        this.reverbDryGain.gain.setTargetAtTime(0.85, now, 0.02);
+        break;
+      }
+
+      case 'hall':
+      default: {
+        const buf = this.createImpulseResponse(2.5, 2.2);
+        if (buf) this.convolver.buffer = buf;
+        this.reverbWetGain.gain.setTargetAtTime(0.35, now, 0.02);
+        this.reverbDryGain.gain.setTargetAtTime(0.90, now, 0.02);
+        break;
+      }
+    }
+  }
+
+  public setTranspose(semitones: number): void {
+    this.transposeSemitones = Math.max(-12, Math.min(12, semitones));
+  }
+
+  public getTranspose(): number {
+    return this.transposeSemitones;
+  }
+
+  public getAudioActivityLevel(): number {
+    if (!this.analyser || !this.analyserDataArray) return 0;
+    // Cast to satisfy TS 5.7+ ArrayBuffer vs ArrayBufferLike DOM signature
+    this.analyser.getByteFrequencyData(this.analyserDataArray as any);
+    let sum = 0;
+    for (let i = 0; i < this.analyserDataArray.length; i++) {
+      sum += this.analyserDataArray[i];
+    }
+    return sum / (this.analyserDataArray.length * 255);
   }
 
   public getContext(): AudioContext | null {
@@ -174,19 +292,20 @@ export class AudioEngine {
    * Plays a note (either MIDI number or note string like "C4")
    */
   public playNote(noteOrMidi: number | string, velocity: number = 0.8): void {
-    const midi = typeof noteOrMidi === 'number' ? noteOrMidi : noteNameToMidi(noteOrMidi);
-    const freq = midiToFrequency(midi);
+    const originalMidi = typeof noteOrMidi === 'number' ? noteOrMidi : noteNameToMidi(noteOrMidi);
+    const transposedMidi = Math.max(21, Math.min(108, originalMidi + this.transposeSemitones));
+    const freq = midiToFrequency(transposedMidi);
 
     // Auto init if needed
     if (!this.ctx || this.ctx.state !== 'running') {
-      this.initAudio().then(() => this.startVoice(midi, freq, velocity));
+      this.initAudio().then(() => this.startVoice(originalMidi, transposedMidi, freq, velocity));
       return;
     }
 
-    this.startVoice(midi, freq, velocity);
+    this.startVoice(originalMidi, transposedMidi, freq, velocity);
   }
 
-  private startVoice(midi: number, freq: number, velocity: number): void {
+  private startVoice(originalMidi: number, transposedMidi: number, freq: number, velocity: number): void {
     if (!this.ctx || !this.compressor) return;
 
     const now = this.ctx.currentTime;
@@ -205,30 +324,51 @@ export class AudioEngine {
         this.createBrightPianoVoice(freq, clampedVel, now, envelopeGain, oscillators, gainNodes);
         break;
 
+      case 'upright-piano':
+        filterNode = this.createUprightPianoVoice(transposedMidi, freq, clampedVel, now, envelopeGain, oscillators, gainNodes);
+        break;
+
+      case 'soft-piano':
+        filterNode = this.createSoftPianoVoice(transposedMidi, freq, clampedVel, now, envelopeGain, oscillators, gainNodes);
+        break;
+
       case 'electric-piano':
         this.createElectricPianoVoice(freq, clampedVel, now, envelopeGain, oscillators, gainNodes);
+        break;
+
+      case 'wurlitzer':
+        this.createWurlitzerVoice(freq, clampedVel, now, envelopeGain, oscillators, gainNodes);
         break;
 
       case 'pipe-organ':
         this.createOrganVoice(freq, clampedVel, now, envelopeGain, oscillators, gainNodes);
         break;
 
+      case 'jazz-organ':
+        this.createJazzOrganVoice(freq, clampedVel, now, envelopeGain, oscillators, gainNodes);
+        break;
+
       case 'strings-pad':
         this.createStringsVoice(freq, clampedVel, now, envelopeGain, oscillators, gainNodes);
         break;
 
+      case 'analog-synth':
+        this.createAnalogSynthVoice(freq, clampedVel, now, envelopeGain, oscillators, gainNodes);
+        break;
+
       case 'acoustic-grand':
       default:
-        filterNode = this.createAcousticGrandVoice(midi, freq, clampedVel, now, envelopeGain, oscillators, gainNodes);
+        filterNode = this.createAcousticGrandVoice(transposedMidi, freq, clampedVel, now, envelopeGain, oscillators, gainNodes);
         break;
     }
 
     // Connect voice output
     envelopeGain.connect(this.compressor);
 
-    // Track active voice
+    // Track active voice keyed by original MIDI
     const voice: ActiveVoice = {
-      midi,
+      midi: originalMidi,
+      transposedMidi,
       oscillators,
       gainNodes,
       filterNode,
@@ -238,15 +378,13 @@ export class AudioEngine {
       isSustained: this.sustainPedal,
     };
 
-    const existing = this.activeVoices.get(midi) || [];
+    const existing = this.activeVoices.get(originalMidi) || [];
     existing.push(voice);
-    this.activeVoices.set(midi, existing);
+    this.activeVoices.set(originalMidi, existing);
   }
 
   /**
-   * Acoustic Grand Piano Voice:
-   * Multi-partial physical harmonic synthesis with hammer impulse,
-   * frequency-dependent decay, and brightness envelope.
+   * Acoustic Grand Piano Voice
    */
   private createAcousticGrandVoice(
     midi: number,
@@ -259,25 +397,20 @@ export class AudioEngine {
   ): BiquadFilterNode {
     const ctx = this.ctx!;
 
-    // Soundboard brightness filter
     const filter = ctx.createBiquadFilter();
     filter.type = 'lowpass';
-    // Higher velocity = brighter hammer attack
     const startCutoff = Math.min(14000, freq * (3.5 + velocity * 4));
     filter.frequency.setValueAtTime(startCutoff, now);
     filter.frequency.exponentialRampToValueAtTime(Math.max(400, freq * 1.5), now + 2.5);
 
-    // Natural decay time: lower bass notes ring longer (up to 4.5s), treble notes decay faster (1.2s)
     const normalizedOctave = Math.max(0, Math.min(8, midi / 12 - 1));
     const decayDuration = Math.max(1.2, 4.8 - normalizedOctave * 0.42);
 
-    // Envelope
     envelopeGain.gain.setValueAtTime(0.0001, now);
-    envelopeGain.gain.linearRampToValueAtTime(velocity * 0.9, now + 0.004); // Fast percussive attack
-    envelopeGain.gain.exponentialRampToValueAtTime(velocity * 0.45, now + 0.12); // Initial drop after hammer bounce
-    envelopeGain.gain.exponentialRampToValueAtTime(0.0001, now + decayDuration); // Long harmonic tail
+    envelopeGain.gain.linearRampToValueAtTime(velocity * 0.9, now + 0.004);
+    envelopeGain.gain.exponentialRampToValueAtTime(velocity * 0.45, now + 0.12);
+    envelopeGain.gain.exponentialRampToValueAtTime(0.0001, now + decayDuration);
 
-    // Partial 1: Fundamental
     const osc1 = ctx.createOscillator();
     osc1.type = 'triangle';
     osc1.frequency.setValueAtTime(freq, now);
@@ -289,7 +422,6 @@ export class AudioEngine {
     oscillators.push(osc1);
     gainNodes.push(gain1);
 
-    // Partial 2: Second harmonic (slightly detuned for natural grand piano chorus string beating)
     const osc2 = ctx.createOscillator();
     osc2.type = 'sine';
     osc2.frequency.setValueAtTime(freq * 2.0015, now);
@@ -302,7 +434,6 @@ export class AudioEngine {
     oscillators.push(osc2);
     gainNodes.push(gain2);
 
-    // Partial 3: Third harmonic overtone
     const osc3 = ctx.createOscillator();
     osc3.type = 'sine';
     osc3.frequency.setValueAtTime(freq * 3.004, now);
@@ -315,7 +446,6 @@ export class AudioEngine {
     oscillators.push(osc3);
     gainNodes.push(gain3);
 
-    // Hammer click transient
     if (this.hammerNoiseBuffer) {
       const noise = ctx.createBufferSource();
       noise.buffer = this.hammerNoiseBuffer;
@@ -344,6 +474,257 @@ export class AudioEngine {
     });
 
     return filter;
+  }
+
+  /**
+   * Vintage Upright Piano Voice
+   */
+  private createUprightPianoVoice(
+    midi: number,
+    freq: number,
+    velocity: number,
+    now: number,
+    envelopeGain: GainNode,
+    oscillators: OscillatorNode[],
+    gainNodes: GainNode[]
+  ): BiquadFilterNode {
+    const ctx = this.ctx!;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(Math.min(9000, freq * (2.8 + velocity * 3)), now);
+    filter.frequency.exponentialRampToValueAtTime(Math.max(300, freq * 1.3), now + 1.8);
+
+    const decayDuration = 2.8;
+    envelopeGain.gain.setValueAtTime(0.0001, now);
+    envelopeGain.gain.linearRampToValueAtTime(velocity * 0.88, now + 0.005);
+    envelopeGain.gain.exponentialRampToValueAtTime(0.0001, now + decayDuration);
+
+    // Warm body harmonic pair
+    const osc1 = ctx.createOscillator();
+    osc1.type = 'triangle';
+    osc1.frequency.setValueAtTime(freq, now);
+
+    const osc2 = ctx.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(freq * 1.998, now); // Slight detuned upright wood cabinet
+
+    const gain1 = ctx.createGain();
+    gain1.gain.setValueAtTime(0.65, now);
+    const gain2 = ctx.createGain();
+    gain2.gain.setValueAtTime(0.35, now);
+
+    osc1.connect(gain1);
+    osc2.connect(gain2);
+    gain1.connect(filter);
+    gain2.connect(filter);
+    filter.connect(envelopeGain);
+
+    oscillators.push(osc1, osc2);
+    gainNodes.push(gain1, gain2);
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + decayDuration + 0.1);
+    osc2.stop(now + decayDuration + 0.1);
+
+    return filter;
+  }
+
+  /**
+   * Soft Felt Piano Voice
+   */
+  private createSoftPianoVoice(
+    midi: number,
+    freq: number,
+    velocity: number,
+    now: number,
+    envelopeGain: GainNode,
+    oscillators: OscillatorNode[],
+    gainNodes: GainNode[]
+  ): BiquadFilterNode {
+    const ctx = this.ctx!;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    // Heavily damped top frequencies (felt cloth between hammers and strings)
+    filter.frequency.setValueAtTime(Math.min(2600, freq * 2.2), now);
+
+    const decayDuration = 3.2;
+    envelopeGain.gain.setValueAtTime(0.0001, now);
+    envelopeGain.gain.linearRampToValueAtTime(velocity * 0.75, now + 0.015); // gentle felt attack
+    envelopeGain.gain.exponentialRampToValueAtTime(0.0001, now + decayDuration);
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, now);
+
+    const oscSub = ctx.createOscillator();
+    oscSub.type = 'triangle';
+    oscSub.frequency.setValueAtTime(freq, now);
+
+    const gain1 = ctx.createGain();
+    gain1.gain.setValueAtTime(0.65, now);
+    const gain2 = ctx.createGain();
+    gain2.gain.setValueAtTime(0.3, now);
+
+    osc.connect(gain1);
+    oscSub.connect(gain2);
+    gain1.connect(filter);
+    gain2.connect(filter);
+    filter.connect(envelopeGain);
+
+    oscillators.push(osc, oscSub);
+    gainNodes.push(gain1, gain2);
+    osc.start(now);
+    oscSub.start(now);
+    osc.stop(now + decayDuration + 0.1);
+    oscSub.stop(now + decayDuration + 0.1);
+
+    return filter;
+  }
+
+  /**
+   * Wurlitzer Electric Reed Piano
+   */
+  private createWurlitzerVoice(
+    freq: number,
+    velocity: number,
+    now: number,
+    envelopeGain: GainNode,
+    oscillators: OscillatorNode[],
+    gainNodes: GainNode[]
+  ): void {
+    const ctx = this.ctx!;
+    envelopeGain.gain.setValueAtTime(0.0001, now);
+    envelopeGain.gain.linearRampToValueAtTime(velocity * 0.82, now + 0.004);
+    envelopeGain.gain.exponentialRampToValueAtTime(0.0001, now + 3.0);
+
+    // Square + Saw reed blend
+    const osc1 = ctx.createOscillator();
+    osc1.type = 'square';
+    osc1.frequency.setValueAtTime(freq, now);
+
+    const osc2 = ctx.createOscillator();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(freq * 2, now);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(Math.min(6000, freq * 4), now);
+    filter.Q.setValueAtTime(2.0, now);
+
+    const g1 = ctx.createGain();
+    g1.gain.setValueAtTime(0.4, now);
+    const g2 = ctx.createGain();
+    g2.gain.setValueAtTime(0.3, now);
+
+    osc1.connect(g1);
+    osc2.connect(g2);
+    g1.connect(filter);
+    g2.connect(filter);
+    filter.connect(envelopeGain);
+
+    oscillators.push(osc1, osc2);
+    gainNodes.push(g1, g2);
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + 3.2);
+    osc2.stop(now + 3.2);
+  }
+
+  /**
+   * Jazz B3 Drawbar Organ
+   */
+  private createJazzOrganVoice(
+    freq: number,
+    velocity: number,
+    now: number,
+    envelopeGain: GainNode,
+    oscillators: OscillatorNode[],
+    gainNodes: GainNode[]
+  ): void {
+    const ctx = this.ctx!;
+    envelopeGain.gain.setValueAtTime(0.0001, now);
+    envelopeGain.gain.linearRampToValueAtTime(velocity * 0.72, now + 0.008);
+
+    // Standard Jazz B3 drawbars: Sub-octave (16'), Fundamental (8'), 5th (2 2/3'), Octave (4')
+    const drawbars = [
+      { ratio: 0.5, amp: 0.4 },
+      { ratio: 1.0, amp: 0.5 },
+      { ratio: 2.0, amp: 0.3 },
+      { ratio: 3.0, amp: 0.15 },
+    ];
+
+    drawbars.forEach(({ ratio, amp }) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq * ratio, now);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(amp, now);
+
+      osc.connect(gain);
+      gain.connect(envelopeGain);
+
+      oscillators.push(osc);
+      gainNodes.push(gain);
+      osc.start(now);
+    });
+
+    // Percussive key-click
+    const clickOsc = ctx.createOscillator();
+    clickOsc.type = 'triangle';
+    clickOsc.frequency.setValueAtTime(freq * 3, now);
+    const clickGain = ctx.createGain();
+    clickGain.gain.setValueAtTime(velocity * 0.35, now);
+    clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.035);
+    clickOsc.connect(clickGain);
+    clickGain.connect(envelopeGain);
+    oscillators.push(clickOsc);
+    gainNodes.push(clickGain);
+    clickOsc.start(now);
+    clickOsc.stop(now + 0.05);
+  }
+
+  /**
+   * Analog PolySynth
+   */
+  private createAnalogSynthVoice(
+    freq: number,
+    velocity: number,
+    now: number,
+    envelopeGain: GainNode,
+    oscillators: OscillatorNode[],
+    gainNodes: GainNode[]
+  ): void {
+    const ctx = this.ctx!;
+    envelopeGain.gain.setValueAtTime(0.0001, now);
+    envelopeGain.gain.linearRampToValueAtTime(velocity * 0.65, now + 0.04); // subtle pad attack
+    envelopeGain.gain.exponentialRampToValueAtTime(velocity * 0.45, now + 0.3);
+
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(Math.min(8000, freq * 5), now);
+    filter.frequency.exponentialRampToValueAtTime(Math.max(350, freq * 1.8), now + 1.5);
+    filter.Q.setValueAtTime(4.0, now);
+
+    // 2 detuned sawtooth oscillators
+    [-6, 6].forEach((detune) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq, now);
+      osc.detune.setValueAtTime(detune, now);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.4, now);
+
+      osc.connect(gain);
+      gain.connect(filter);
+
+      oscillators.push(osc);
+      gainNodes.push(gain);
+      osc.start(now);
+    });
+
+    filter.connect(envelopeGain);
   }
 
   /**
@@ -487,7 +868,6 @@ export class AudioEngine {
     envelopeGain.gain.setValueAtTime(0.0001, now);
     envelopeGain.gain.linearRampToValueAtTime(velocity * 0.65, now + 0.22); // Slow soft attack
 
-    // Detuned sawtooth stereo pair
     [-4, 4].forEach((detune) => {
       const osc = ctx.createOscillator();
       osc.type = 'sawtooth';
@@ -543,7 +923,10 @@ export class AudioEngine {
    * Applies damper release to a voice (acoustic felt damper stopping the strings).
    */
   private applyDamperRelease(voice: ActiveVoice, now: number): void {
-    const releaseTime = this.currentInstrument === 'pipe-organ' ? 0.08 : 0.22;
+    const isOrgan = this.currentInstrument === 'pipe-organ' || this.currentInstrument === 'jazz-organ';
+    const isPad = this.currentInstrument === 'strings-pad' || this.currentInstrument === 'analog-synth';
+    const releaseTime = isOrgan ? 0.06 : isPad ? 0.45 : 0.22;
+
     try {
       voice.envelopeGain.gain.cancelScheduledValues(now);
       const currentGain = Math.max(0.0001, voice.envelopeGain.gain.value);
@@ -590,6 +973,27 @@ export class AudioEngine {
       });
     });
     this.activeVoices.clear();
+  }
+
+  // ================= TAP TEMPO ENGINE =================
+
+  public tapTempo(): number {
+    const now = performance.now();
+    // Clear taps older than 3 seconds
+    this.tapTimestamps = this.tapTimestamps.filter((t) => now - t < 3000);
+    this.tapTimestamps.push(now);
+
+    if (this.tapTimestamps.length >= 2) {
+      let intervalSum = 0;
+      for (let i = 1; i < this.tapTimestamps.length; i++) {
+        intervalSum += this.tapTimestamps[i] - this.tapTimestamps[i - 1];
+      }
+      const avgInterval = intervalSum / (this.tapTimestamps.length - 1);
+      const calculatedBpm = Math.round(60000 / avgInterval);
+      const clampedBpm = Math.max(40, Math.min(240, calculatedBpm));
+      return clampedBpm;
+    }
+    return this.metronomeBpm;
   }
 
   // ================= METRONOME ENGINE =================
@@ -645,7 +1049,7 @@ export class AudioEngine {
     const gain = this.ctx.createGain();
 
     osc.type = isDownbeat ? 'triangle' : 'sine';
-    osc.frequency.setValueAtTime(isDownbeat ? 1760 : 880, now); // A6 or A5 crisp tick
+    osc.frequency.setValueAtTime(isDownbeat ? 1760 : 880, now);
 
     gain.gain.setValueAtTime(0.0001, now);
     gain.gain.linearRampToValueAtTime(isDownbeat ? 0.35 : 0.2, now + 0.002);

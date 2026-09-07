@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useRef, useEffect, useCallback } from 'react';
+import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import { PianoNote, ActiveNoteState, KeyLabelDisplay } from '@/types/piano';
+import { getScalePitchClasses } from '@/lib/notes';
 import { PianoKey } from './PianoKey';
 
 interface PianoKeyboardProps {
@@ -11,6 +12,8 @@ interface PianoKeyboardProps {
   keyboardMapping: Map<string, string>;
   keyLabels: KeyLabelDisplay;
   baseOctave: number;
+  activeScale?: string;
+  practiceTargetMidi?: number | null;
   onNoteStart: (midi: number, velocity?: number, source?: 'mouse' | 'touch') => void;
   onNoteStop: (midi: number, source?: 'mouse' | 'touch') => void;
 }
@@ -22,10 +25,17 @@ export function PianoKeyboard({
   keyboardMapping,
   keyLabels,
   baseOctave,
+  activeScale = 'none',
+  practiceTargetMidi = null,
   onNoteStart,
   onNoteStop,
 }: PianoKeyboardProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Pitch classes in currently active scale
+  const scalePitchClasses = useMemo(() => {
+    return getScalePitchClasses(activeScale);
+  }, [activeScale]);
 
   // Group keys: separate white keys and associate any following black key
   const whiteKeyGroups = React.useMemo(() => {
@@ -158,6 +168,12 @@ export function PianoKeyboard({
             const whiteShortcut = noteToShortcutMap.get(whiteKey.name);
             const blackShortcut = blackKey ? noteToShortcutMap.get(blackKey.name) : undefined;
 
+            const isWhiteInScale = scalePitchClasses.has(whiteKey.noteName);
+            const isWhitePracticeTarget = practiceTargetMidi === whiteKey.midi;
+
+            const isBlackInScale = blackKey ? scalePitchClasses.has(blackKey.noteName) : false;
+            const isBlackPracticeTarget = blackKey ? practiceTargetMidi === blackKey.midi : false;
+
             return (
               <div
                 key={whiteKey.midi}
@@ -171,6 +187,8 @@ export function PianoKeyboard({
                   isSustained={sustain}
                   keyboardShortcut={whiteShortcut}
                   keyLabelDisplay={keyLabels}
+                  isScaleHighlight={isWhiteInScale}
+                  isPracticeTarget={isWhitePracticeTarget}
                   onNoteStart={onNoteStart}
                   onNoteStop={onNoteStop}
                 />
@@ -187,6 +205,8 @@ export function PianoKeyboard({
                       isSustained={sustain}
                       keyboardShortcut={blackShortcut}
                       keyLabelDisplay={keyLabels}
+                      isScaleHighlight={isBlackInScale}
+                      isPracticeTarget={isBlackPracticeTarget}
                       onNoteStart={onNoteStart}
                       onNoteStop={onNoteStop}
                     />

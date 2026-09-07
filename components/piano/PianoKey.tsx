@@ -9,6 +9,8 @@ interface PianoKeyProps {
   isSustained: boolean;
   keyboardShortcut?: string;
   keyLabelDisplay: KeyLabelDisplay;
+  isScaleHighlight?: boolean;
+  isPracticeTarget?: boolean;
   onNoteStart: (midi: number) => void;
   onNoteStop: (midi: number) => void;
 }
@@ -19,6 +21,8 @@ export const PianoKey = memo(function PianoKey({
   isSustained,
   keyboardShortcut,
   keyLabelDisplay,
+  isScaleHighlight = false,
+  isPracticeTarget = false,
   onNoteStart,
   onNoteStop,
 }: PianoKeyProps) {
@@ -76,8 +80,21 @@ export const PianoKey = memo(function PianoKey({
               : 'bg-gradient-to-b from-[#2e2e32] via-[#1c1c1f] to-[#0f0f11] shadow-[2px_6px_10px_rgba(0,0,0,0.7),inset_0_1px_1px_rgba(255,255,255,0.15),inset_0_-3px_3px_rgba(0,0,0,0.6)] border-b-[3px] border-[#08080a] hover:from-[#3a3a3f] hover:via-[#242428]'
           }
           ${isSustained && !isPressed ? 'ring-1 ring-amber-400/40' : ''}
+          ${isPracticeTarget ? 'ring-2 ring-amber-400 shadow-[0_0_16px_rgba(245,158,11,0.95)] z-30 animate-pulse' : ''}
         `}
       >
+        {/* Scale highlight dot */}
+        {isScaleHighlight && !isPracticeTarget && !isPressed && (
+          <div className="absolute top-3 w-1.5 h-1.5 rounded-full bg-amber-400/80 shadow-[0_0_4px_rgba(245,158,11,0.8)] pointer-events-none" />
+        )}
+
+        {/* Practice target badge */}
+        {isPracticeTarget && (
+          <div className="absolute top-1 px-1 py-0.5 rounded bg-amber-400 text-[8px] font-bold text-stone-950 uppercase tracking-wider pointer-events-none">
+            Target
+          </div>
+        )}
+
         {/* Subtle top edge specular reflection */}
         <div className="absolute top-0 left-[10%] right-[10%] h-[1.5px] bg-white/20 rounded-full pointer-events-none" />
 
@@ -131,8 +148,21 @@ export const PianoKey = memo(function PianoKey({
             : 'bg-gradient-to-b from-[#ffffff] via-[#faf8f5] to-[#ece7df] shadow-[0_5px_8px_rgba(0,0,0,0.25),inset_0_-4px_6px_rgba(0,0,0,0.06),inset_0_1px_1px_rgba(255,255,255,0.9)] border-b-[5px] border-[#c4bdb1] hover:to-[#e4dfd6]'
         }
         ${isSustained && !isPressed ? 'bg-gradient-to-b from-[#fdfbf7] to-[#e4e0d7] shadow-[inset_0_-2px_4px_rgba(245,158,11,0.2)]' : ''}
+        ${isPracticeTarget ? 'ring-2 ring-amber-500 shadow-[0_0_18px_rgba(245,158,11,0.85)] z-25 animate-pulse' : ''}
       `}
     >
+      {/* Scale highlight dot */}
+      {isScaleHighlight && !isPracticeTarget && !isPressed && (
+        <div className="absolute top-4 w-2 h-2 rounded-full bg-amber-500/80 shadow-[0_0_5px_rgba(245,158,11,0.7)] pointer-events-none" />
+      )}
+
+      {/* Practice target badge */}
+      {isPracticeTarget && (
+        <div className="absolute top-3 px-1.5 py-0.5 rounded bg-amber-500 text-[9px] font-bold text-stone-950 uppercase tracking-wider pointer-events-none shadow-sm">
+          Play
+        </div>
+      )}
+
       {/* Subtle indicator strip on pressed */}
       {isPressed && (
         <div className="absolute bottom-1 w-3 h-1 bg-amber-500 rounded-full pointer-events-none" />

@@ -11,9 +11,13 @@ import {
   Plus,
   Radio,
   BookmarkCheck,
+  Waves,
+  Music2,
+  GraduationCap,
+  Timer,
 } from 'lucide-react';
-import { InstrumentId, KeyLabelDisplay } from '@/types/piano';
-import { AVAILABLE_INSTRUMENTS } from '@/lib/constants';
+import { InstrumentId, KeyLabelDisplay, ReverbPreset } from '@/types/piano';
+import { AVAILABLE_INSTRUMENTS, AVAILABLE_REVERBS, SCALES_LIST } from '@/lib/constants';
 
 interface ControlStripProps {
   currentInstrument: InstrumentId;
@@ -29,6 +33,7 @@ interface ControlStripProps {
   metronomeBeat: number;
   onToggleMetronome: () => void;
   onChangeBpm: (delta: number) => void;
+  onTapTempo: () => void;
   isRecording: boolean;
   onStartRecording: () => void;
   onStopRecording: () => void;
@@ -36,6 +41,15 @@ interface ControlStripProps {
   onOpenRecordingsModal: () => void;
   keyLabels: KeyLabelDisplay;
   onToggleKeyLabels: () => void;
+  // Studio enhancements
+  transpose: number;
+  onChangeTranspose: (semitones: number) => void;
+  reverb: ReverbPreset;
+  onSelectReverb: (preset: ReverbPreset) => void;
+  activeScale: string;
+  onSelectScale: (scaleId: string) => void;
+  practiceMode: boolean;
+  onTogglePracticeMode: () => void;
 }
 
 export function ControlStrip({
@@ -52,6 +66,7 @@ export function ControlStrip({
   metronomeBeat,
   onToggleMetronome,
   onChangeBpm,
+  onTapTempo,
   isRecording,
   onStartRecording,
   onStopRecording,
@@ -59,12 +74,24 @@ export function ControlStrip({
   onOpenRecordingsModal,
   keyLabels,
   onToggleKeyLabels,
+  transpose,
+  onChangeTranspose,
+  reverb,
+  onSelectReverb,
+  activeScale,
+  onSelectScale,
+  practiceMode,
+  onTogglePracticeMode,
 }: ControlStripProps) {
   const [instrumentMenuOpen, setInstrumentMenuOpen] = useState(false);
   const [rangeMenuOpen, setRangeMenuOpen] = useState(false);
+  const [reverbMenuOpen, setReverbMenuOpen] = useState(false);
+  const [scaleMenuOpen, setScaleMenuOpen] = useState(false);
 
   const instRef = useRef<HTMLDivElement>(null);
   const rangeRef = useRef<HTMLDivElement>(null);
+  const reverbRef = useRef<HTMLDivElement>(null);
+  const scaleRef = useRef<HTMLDivElement>(null);
 
   // Close menus on click outside
   useEffect(() => {
@@ -75,12 +102,20 @@ export function ControlStrip({
       if (rangeRef.current && !rangeRef.current.contains(e.target as Node)) {
         setRangeMenuOpen(false);
       }
+      if (reverbRef.current && !reverbRef.current.contains(e.target as Node)) {
+        setReverbMenuOpen(false);
+      }
+      if (scaleRef.current && !scaleRef.current.contains(e.target as Node)) {
+        setScaleMenuOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   const currentInstInfo = AVAILABLE_INSTRUMENTS.find((i) => i.id === currentInstrument);
+  const currentReverbInfo = AVAILABLE_REVERBS.find((r) => r.id === reverb);
+  const currentScaleInfo = SCALES_LIST.find((s) => s.id === activeScale);
 
   // Octave range label
   const startNote = `C${baseOctave}`;
@@ -90,9 +125,9 @@ export function ControlStrip({
   return (
     <div
       id="piano-control-strip"
-      className="w-full max-w-6xl mx-auto px-2 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 sm:gap-3 text-xs text-stone-300"
+      className="w-full max-w-7xl mx-auto px-2 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2 sm:gap-2.5 text-xs text-stone-300"
     >
-      {/* LEFT GROUP: Instrument selector & Range */}
+      {/* LEFT GROUP: Instrument selector, Octave, Range, Transpose */}
       <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
         {/* Instrument Dropdown */}
         <div className="relative" ref={instRef}>
@@ -100,10 +135,10 @@ export function ControlStrip({
             id="instrument-selector-button"
             type="button"
             onClick={() => setInstrumentMenuOpen((v) => !v)}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-stone-900/90 border border-stone-800 hover:border-stone-700 hover:bg-stone-800/80 transition-all text-stone-200"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-stone-900/90 border border-stone-800 hover:border-stone-700 hover:bg-stone-800/80 transition-all text-stone-200 shadow-sm"
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span className="font-medium truncate max-w-[120px] sm:max-w-[160px]">
+            <span className="font-medium truncate max-w-[120px] sm:max-w-[150px]">
               {currentInstInfo?.name || 'Grand Piano'}
             </span>
             <ChevronDown className="w-3.5 h-3.5 text-stone-400" />
@@ -112,9 +147,9 @@ export function ControlStrip({
           {instrumentMenuOpen && (
             <div className="absolute left-0 top-full mt-1.5 w-64 bg-[#18181b] border border-stone-700/90 rounded-xl shadow-2xl p-1.5 z-50 animate-in fade-in zoom-in-95">
               <div className="px-2.5 py-1 text-[10px] uppercase font-mono text-stone-400 tracking-wider">
-                Select Instrument
+                Select Instrument (10 Studio Timbres)
               </div>
-              <div className="flex flex-col gap-0.5">
+              <div className="flex flex-col gap-0.5 max-h-72 overflow-y-auto">
                 {AVAILABLE_INSTRUMENTS.map((inst) => (
                   <button
                     key={inst.id}
@@ -180,6 +215,39 @@ export function ControlStrip({
           </button>
         </div>
 
+        {/* Transpose Controls */}
+        <div className="flex items-center rounded-lg bg-stone-900/90 border border-stone-800 p-0.5" title="Pitch Transpose (Semitones)">
+          <button
+            type="button"
+            onClick={() => onChangeTranspose(Math.max(-12, transpose - 1))}
+            disabled={transpose <= -12}
+            className="p-1.5 rounded hover:bg-stone-800 text-stone-400 hover:text-stone-200 disabled:opacity-30"
+            title="Transpose Down 1 Semitone"
+          >
+            <Minus className="w-3 h-3" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onChangeTranspose(0)}
+            title="Click to reset transpose to 0"
+            className="px-1.5 font-mono text-[11px] hover:text-amber-300 transition-colors"
+          >
+            <span className="text-stone-400 text-[10px]">TR:</span>{' '}
+            <span className={transpose !== 0 ? 'text-amber-400 font-bold' : 'text-stone-300'}>
+              {transpose > 0 ? `+${transpose}` : transpose}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onChangeTranspose(Math.min(12, transpose + 1))}
+            disabled={transpose >= 12}
+            className="p-1.5 rounded hover:bg-stone-800 text-stone-400 hover:text-stone-200 disabled:opacity-30"
+            title="Transpose Up 1 Semitone"
+          >
+            <Plus className="w-3 h-3" />
+          </button>
+        </div>
+
         {/* Keyboard Size / Range Preset */}
         <div className="relative" ref={rangeRef}>
           <button
@@ -189,7 +257,7 @@ export function ControlStrip({
             title="Select visible keyboard range"
             className="px-2.5 py-1.5 rounded-lg bg-stone-900/90 border border-stone-800 hover:border-stone-700 text-stone-300 font-mono text-[11px] flex items-center gap-1.5"
           >
-            <span>{visibleOctaves >= 7 ? '88 Keys' : `${visibleOctaves} Octaves`}</span>
+            <span>{visibleOctaves >= 7 ? '88 Keys' : `${visibleOctaves} Oct`}</span>
             <ChevronDown className="w-3 h-3 text-stone-400" />
           </button>
 
@@ -216,9 +284,120 @@ export function ControlStrip({
         </div>
       </div>
 
-      {/* RIGHT GROUP: Metronome, Record, Sustain, Labels */}
+      {/* RIGHT GROUP: Reverb, Scale, Metronome/Tap, Record, Sustain, Practice */}
       <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-        {/* Metronome */}
+        {/* Reverb Dropdown */}
+        <div className="relative" ref={reverbRef}>
+          <button
+            id="reverb-button"
+            type="button"
+            onClick={() => setReverbMenuOpen((v) => !v)}
+            title="Acoustic Space Reverb"
+            className={`
+              flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border font-mono text-[11px] transition-colors
+              ${
+                reverb !== 'off'
+                  ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                  : 'bg-stone-900/90 border-stone-800 text-stone-400 hover:text-stone-200'
+              }
+            `}
+          >
+            <Waves className="w-3.5 h-3.5" />
+            <span>{currentReverbInfo?.name || 'Reverb'}</span>
+            <ChevronDown className="w-3 h-3 text-stone-400" />
+          </button>
+
+          {reverbMenuOpen && (
+            <div className="absolute right-0 top-full mt-1.5 w-44 bg-[#18181b] border border-stone-700 rounded-xl shadow-xl p-1 z-50">
+              <div className="px-2 py-1 text-[10px] uppercase font-mono text-stone-400 tracking-wider">
+                Acoustic Space
+              </div>
+              {AVAILABLE_REVERBS.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => {
+                    onSelectReverb(r.id);
+                    setReverbMenuOpen(false);
+                  }}
+                  className={`
+                    w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-mono transition-colors
+                    ${reverb === r.id ? 'bg-amber-500/20 text-amber-300 font-semibold' : 'text-stone-300 hover:bg-stone-800'}
+                  `}
+                >
+                  {r.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Scale Guide Dropdown */}
+        <div className="relative" ref={scaleRef}>
+          <button
+            id="scale-button"
+            type="button"
+            onClick={() => setScaleMenuOpen((v) => !v)}
+            title="Musical Scale Highlighting"
+            className={`
+              hidden md:flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border font-mono text-[11px] transition-colors
+              ${
+                activeScale !== 'none'
+                  ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                  : 'bg-stone-900/90 border-stone-800 text-stone-400 hover:text-stone-200'
+              }
+            `}
+          >
+            <Music2 className="w-3.5 h-3.5" />
+            <span>{currentScaleInfo?.name || 'Scale'}</span>
+            <ChevronDown className="w-3 h-3 text-stone-400" />
+          </button>
+
+          {scaleMenuOpen && (
+            <div className="absolute right-0 top-full mt-1.5 w-48 bg-[#18181b] border border-stone-700 rounded-xl shadow-xl p-1 z-50 max-h-60 overflow-y-auto">
+              <div className="px-2 py-1 text-[10px] uppercase font-mono text-stone-400 tracking-wider">
+                Key Signature Guide
+              </div>
+              {SCALES_LIST.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => {
+                    onSelectScale(s.id);
+                    setScaleMenuOpen(false);
+                  }}
+                  className={`
+                    w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-mono transition-colors
+                    ${activeScale === s.id ? 'bg-amber-500/20 text-amber-300 font-semibold' : 'text-stone-300 hover:bg-stone-800'}
+                  `}
+                >
+                  {s.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Practice Mode Trainer Toggle */}
+        <button
+          id="practice-mode-button"
+          type="button"
+          onClick={onTogglePracticeMode}
+          title="Interactive Scale Practice Trainer"
+          className={`
+            flex items-center gap-1 px-2.5 py-1.5 rounded-lg border font-medium text-[11px] font-mono transition-all
+            ${
+              practiceMode
+                ? 'bg-amber-500 text-stone-950 border-amber-400 font-bold shadow-[0_0_10px_rgba(245,158,11,0.5)]'
+                : 'bg-stone-900/90 border-stone-800 text-stone-400 hover:text-stone-200 hover:bg-stone-800'
+            }
+          `}
+        >
+          <GraduationCap className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">PRACTICE</span>
+        </button>
+
+        {/* Metronome & Tap Tempo */}
         <div className="flex items-center rounded-lg bg-stone-900/90 border border-stone-800 p-0.5">
           <button
             id="metronome-toggle-button"
@@ -257,6 +436,16 @@ export function ControlStrip({
             className="p-1 hover:bg-stone-800 rounded text-stone-400 hover:text-stone-200"
           >
             <Plus className="w-3 h-3" />
+          </button>
+
+          <button
+            type="button"
+            onClick={onTapTempo}
+            title="Tap Tempo (Tap repeatedly to detect BPM)"
+            className="px-1.5 py-1 text-[10px] font-mono hover:bg-stone-800 rounded text-stone-400 hover:text-amber-300 border-l border-stone-800 ml-0.5"
+          >
+            <Timer className="w-3 h-3 inline mr-0.5" />
+            <span>TAP</span>
           </button>
         </div>
 
